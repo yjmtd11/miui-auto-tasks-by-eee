@@ -1,7 +1,7 @@
 '''
 Date: 2023-12-03 02:07:29
 LastEditors: Night-stars-1 nujj1042633805@gmail.com
-LastEditTime: 2023-12-29 00:20:07
+LastEditTime: 2025-02-05
 '''
 """签到实例"""
 
@@ -16,6 +16,7 @@ from ..data_model import ApiResultHandler, DailyTasksResult, SignResultHandler, 
 from ..request import get, post
 from ..logger import log
 from ..utils import is_incorrect_return, get_random_chars_as_string
+
 
 class BaseSign:
     """
@@ -77,6 +78,7 @@ class BaseSign:
     async def check_daily_tasks(self, nolog: bool = False) -> Union[List[DailyTasksResult], List[None]]:
         """获取每日任务状态"""
         try:
+            task_status: List[DailyTasksResult] = []
             for attempt in Retrying(stop=stop_after_attempt(3)):
                 with attempt:
                     response = await get('https://api-alpha.vip.miui.com/mtop/planet/vip/member/getCheckinPageCakeList',
@@ -85,26 +87,32 @@ class BaseSign:
                     result = response.json()
                     api_data = ApiResultHandler(result)
                     if api_data.success:
-                        task_status = []
                         tasks: List[Dict[str, List[Dict[str, Any]]]] = list(filter(
                             lambda x: x['head']['title'] in ["每日任务", "其他任务"], api_data.data))
                         for task in tasks:
                             for daily_task in task['data']:
                                 task_name = daily_task['title']
                                 task_desc = daily_task.get('desc', '')
-                                show_type = True if daily_task['showType'] == 0 else False  # pylint: disable=simplifiable-if-expression
+                                show_type = True if daily_task['showType'] == 0 else False
                                 task_status.append(DailyTasksResult(name=task_name, showType=show_type, desc=task_desc))
+                        task_status.append(
+                            DailyTasksResult(
+                                name=WxSign.NAME,
+                                showType=False,
+                                desc=WxSign.NAME,
+                            )
+                        )
                         return task_status
                     else:
                         if not nolog:
                             log.error(f"获取每日任务状态失败：{api_data.message}")
-                    return []
+            return task_status
         except RetryError as error:
             if is_incorrect_return(error):
                 log.exception(f"每日任务 - 服务器没有正确返回 {response.text}")
             else:
                 log.exception("获取每日任务异常")
-            return []
+            return task_status
 
     async def sign(self) -> Tuple[bool, str]:
         """
@@ -192,6 +200,8 @@ class BaseSign:
             else:
                 log.exception("获取用户信息异常")
             return UserInfoResult()
+
+
 #pylint: disable=trailing-whitespace
 class CheckIn(BaseSign):
     """
@@ -347,7 +357,18 @@ class CarrotPull(BaseSign):
     URL_SIGN = 'https://api-alpha.vip.miui.com/api/carrot/pull'
 
 
+class WxSign(BaseSign):
+    """
+    微信签到
+    """
+    NAME = "微信小程序签到"
+    PARAMS = {"miui_vip_a_ph": "{miui_vip_a_ph}"}
+    DATA = {"action": "WECHAT_CHECKIN_TASK"}
+    URL_SIGN = "https://api.vip.miui.com/mtop/planet/vip/member/addCommunityGrowUpPointByActionV2"
+
+
 # 注册签到任务
+BaseSign.AVAILABLE_SIGNS[WxSign.NAME] = WxSign
 BaseSign.AVAILABLE_SIGNS[CheckIn.NAME] = CheckIn
 BaseSign.AVAILABLE_SIGNS[BrowsePost.NAME] = BrowsePost
 BaseSign.AVAILABLE_SIGNS[BrowseVideoPost.NAME] = BrowseVideoPost
